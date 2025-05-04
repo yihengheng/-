@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>牛市价差策略盈亏图</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    label {
+      display: inline-block;
+      width: 250px;
+    }
+    input {
+      margin: 5px;
+    }
+    canvas {
+      margin-top: 20px;
+    }
+    .analysis {
+      margin-top: 20px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      background-color: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+  <h2>牛市价差策略 - 盈亏图</h2>
+
+  <label>买入Call行权价K1：<input type="number" id="k1" value="100" step="0.1" onchange="drawChart()"></label><br>
+  <label>买入Call权利金P1：<input type="number" id="p1" value="5" step="0.01" onchange="drawChart()"></label><br>
+  <label>买入张数：<input type="number" id="qty1" value="1" onchange="drawChart()"></label><br><br>
+
+  <label>卖出Call行权价K2：<input type="number" id="k2" value="110" step="0.1" onchange="drawChart()"></label><br>
+  <label>卖出Call权利金P2：<input type="number" id="p2" value="2" step="0.01" onchange="drawChart()"></label><br>
+  <label>卖出张数：<input type="number" id="qty2" value="1" onchange="drawChart()"></label><br><br>
+
+  <button onclick="drawChart()">生成盈亏图</button>
+
+  <canvas id="chart" width="600" height="300"></canvas>
+
+  <div class="analysis" id="analysis"></div>
+
+  <script>
+    function calcFee(op, qty, premium) {
+      let commission = Math.max(0.5 * qty, 1.6);
+      let platformFee = Math.max(0.3 * qty, 0.3);
+      let secFee = (op === "sell") ? Math.max(0.0000278 * premium * 100 * qty, 0.01) : 0;
+      return commission + platformFee + secFee;
+    }
+
+    function generateAnalysis(S_range, payoff_range) {
+      let analysisText = "";
+      const maxPayoff = Math.max(...payoff_range);  // 获取最大盈亏
+      const minPayoff = Math.min(...payoff_range);  // 获取最小盈亏
+
+      // 获取盈亏平衡点，处理未找到的情况
+      const breakEvenIndex = payoff_range.indexOf(0);
+      const breakEven = breakEvenIndex !== -1 ? S_range[breakEvenIndex] : null;
+
+      analysisText += `<p><strong>盈亏平衡点：</strong>${breakEven !== null ? `价格 ${breakEven.toFixed(2)} 处盈亏为 0` : '未找到盈亏平衡点'}。</p>`;
+
+      if (maxPayoff > 0) {
+        analysisText += `<p>当前策略可能盈利。</p>`;
+        const profitIndex = payoff_range.indexOf(maxPayoff);
+        const profitPrice = profitIndex !== -1 ? S_range[profitIndex] : null;
+        analysisText += `<p><strong>最大盈利区间：</strong>${profitPrice !== null ? `在价格 ${profitPrice.toFixed(2)} 附近` : '未找到最大盈利区间'}。</p>`;
+      } else {
+        analysisText += `<p>当前策略处于亏损状态。</p>`;
+      }
+
+      if (minPayoff < 0) {
+        const lossIndex = payoff_range.indexOf(minPayoff);
+        const lossPrice = lossIndex !== -1 ? S_range[lossIndex] : null;
+        analysisText += `<p><strong>最大亏损区间：</strong>${lossPrice !== null ? `在价格 ${lossPrice.toFixed(2)} 附近` : '未找到最大亏损区间'}。</p>`;
+      }
+
+      const riskRewardRatio = maxPayoff / Math.abs(minPayoff);
+      analysisText += `<p><strong>盈亏比：</strong>${isFinite(riskRewardRatio) ? `最大盈利与最大亏损的比率为 ${riskRewardRatio.toFixed(2)}` : '无法计算盈亏比'}。</p>`;
+
+      return analysisText;
+    }
+
+    function drawChart() {
+      const K1 = parseFloat(document.getElementById("k1").value);
+      const P1 = parseFloat(document.getElementById("p1").value);
+      const qty1 = parseInt(document.getElementById("qty1").value);
+
+      const K2 = parseFloat(document.getElementById("k2").value);
+      const P2 = parseFloat(document.getElementById("p2").value);
+      const qty2 = parseInt(document.getElementById("qty2").value);
+
+      const total_fee = calcFee("buy", qty1, P1) + calcFee("sell", qty2, P2);
+
+      const S_range = [];
+      const payoff_range = [];
+
+      const S_min = Math.max(K1 - 20, 0);
+      const S_max = K2 + 20;
+      for (let S = S_min; S <= S_max; S += 1) {
+        let payoff = Math.max(S - K1, 0) * qty1 - Math.max(S - K2, 0) * qty2 - (P1 * qty1 - P2 * qty2);
+        payoff -= total_fee;
+        S_range.push(S);
+        payoff_range.push(payoff);
+      }
+
+      const ctx = document.getElementById("chart").getContext("2d");
+
+      // 如果已经存在一个图表，则销毁它
+      if (window.chart instanceof Chart) {
+        window.chart.destroy();
+      }
+
+      // 创建新的图表
+      window.chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: S_range,
+          datasets: [{
+            label: '盈亏图（含手续费）',
+            data: payoff_range,
+            borderColor: 'blue',
+            fill: false
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            x: {
+              title: {
+                display: true,
+                text: '到期价格 S'
+              }
+            },
+            y: {
+              title: {
+                display: true,
+                text: '盈亏 (美元)'
+              }
+            }
+          }
+        }
+      });
+
+      // 生成并显示分析
+      const analysisText = generateAnalysis(S_range, payoff_range);
+      document.getElementById("analysis").innerHTML = analysisText;
+    }
+
+    // 初始化图表
+    drawChart();
+  </script>
+</body>
+</html>
